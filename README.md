@@ -1,19 +1,17 @@
-# Whole File Source
+# Phoenix Source
 
 [![cm-available](https://cdap-users.herokuapp.com/assets/cm-available.svg)](https://docs.cask.co/cdap/current/en/integrations/cask-market.html)
 ![cdap-batch-source](https://cdap-users.herokuapp.com/assets/cdap-batch-source.svg)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Join CDAP community](https://cdap-users.herokuapp.com/badge.svg?t=wrangler)](https://cdap-users.herokuapp.com?t=1)
 
-Whole file source reads the entire file. It's highly recommended not
-to use this plugin when the files are very large and splittable.
-
+Phoenix batch source allows for reading data from HBase tables accessed through the Phoenix SQL layer.
 ## Plugin Configuration
 
 | Configuration | Required | Default | Description |
 | :------------ | :------: | :----- | :---------- |
-| **Input Path** | **N** | 1 | Specifies path to a file or collection of files. |
-
+| **Table** | **Y** | 1 | Table to be quieried. |
+| **SQL Statement** | **Y** | 1 | SQL statement that will query the table for the desired records. |
 ## Usage Notes
 
 If a path specified is a directory, then one file is read at a time
@@ -23,10 +21,10 @@ file is read and passed along.
 # Build
 
 ## Clone this repo
-Clone the this repo to your local environment
+Clone this repo to your local environment
 
 ```
-  git clone https://github.com/hydrator/whole-file-reader.git whole-file-reader
+  git clone https://github.com/data-integrations/phoenix-plugins.git phoenix-source
 ```
 
 ## Build
@@ -41,11 +39,11 @@ These files can be used to deploy your plugins.
 ## Deployment
 You can deploy your plugins using the CDAP CLI:
 
-    > load artifact <target/whole-file-source-<version>.jar> config-file <target/whole-file-source-<version>.json>
+    > load artifact <target/phoenix-source-<version>.jar> config-file <target/phoenix-source-<version>.json>
 
 For example, if your artifact is named 'repartitioner-<version>:
 
-    > load artifact target/whole-file-source-<version>.jar config-file target/whole-file-source-<version>.json
+    > load artifact target/phoenix-source-<version>.jar config-file target/phoenix-source-<version>.json
 
 # Mailing Lists
 
@@ -60,7 +58,7 @@ to the users.
 
 # License and Trademarks
 
-Copyright © 2016-2017 Cask Data, Inc.
+Copyright © 2016-2018 Cask Data, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
 in compliance with the License. You may obtain a copy of the License at
