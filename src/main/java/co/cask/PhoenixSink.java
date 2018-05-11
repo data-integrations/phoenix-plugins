@@ -1,5 +1,5 @@
 /*
- * Copyright © 2015-2016 Cask Data, Inc.
+ * Copyright © 2018 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -16,47 +16,54 @@
 
 package co.cask;
 
-import co.cask.cdap.api.Config;
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Macro;
 import co.cask.cdap.api.annotation.Name;
 import co.cask.cdap.api.annotation.Plugin;
-import co.cask.cdap.api.data.batch.Input;
 import co.cask.cdap.api.data.batch.Output;
 import co.cask.cdap.api.data.format.StructuredRecord;
 import co.cask.cdap.api.data.schema.Schema;
 import co.cask.cdap.api.dataset.lib.KeyValue;
 import co.cask.cdap.api.dataset.table.Put;
 import co.cask.cdap.api.dataset.table.Table;
+import co.cask.cdap.api.plugin.PluginConfig;
 import co.cask.cdap.etl.api.Emitter;
 import co.cask.cdap.etl.api.PipelineConfigurer;
 import co.cask.cdap.etl.api.batch.BatchRuntimeContext;
+import co.cask.cdap.etl.api.batch.BatchSink;
 import co.cask.cdap.etl.api.batch.BatchSinkContext;
-import co.cask.cdap.etl.api.batch.BatchSourceContext;
 import co.cask.cdap.format.RecordPutTransformer;
+import co.cask.hydrator.common.Constants;
+import co.cask.hydrator.common.ReferenceBatchSink;
 import co.cask.hydrator.common.SchemaValidator;
-import co.cask.hydrator.common.SourceInputFormatProvider;
 import co.cask.hydrator.common.batch.JobUtils;
+import co.cask.hydrator.common.batch.sink.SinkOutputFormatProvider;
+import co.cask.hydrator.plugin.ConnectionConfig;
+import co.cask.hydrator.plugin.DBManager;
 import co.cask.hydrator.plugin.DBRecord;
+import co.cask.hydrator.plugin.FieldCase;
 import co.cask.hydrator.plugin.common.Properties;
 import co.cask.hydrator.plugin.common.TableSinkConfig;
-import co.cask.hydrator.plugin.batch.sink.BatchWritableSink;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import org.apache.hadoop.mapreduce.Job;
-
-import org.apache.phoenix.mapreduce.util.PhoenixMapReduceUtil;
-import org.apache.phoenix.mapreduce.PhoenixInputFormat;
-import org.apache.phoenix.mapreduce.PhoenixOutputFormat;
 import org.apache.hadoop.mapreduce.lib.db.DBWritable;
-import org.apache.hadoop.io.Writable;
+import org.apache.phoenix.mapreduce.PhoenixOutputFormat;
+import org.apache.phoenix.mapreduce.util.PhoenixMapReduceUtil;
 
-
-
-import java.sql.PreparedStatement;
-
-
+import java.sql.Connection;
+import java.sql.Driver;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.Statement;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import javax.annotation.Nullable;
 
 /**
  * CDAP Table Dataset Batch Sink.
@@ -65,100 +72,119 @@ import java.util.Map;
 @Name("PhoenixSink")
 @Description("Writes records to a Table with one record field mapping to the Table rowkey," +
   " and all other record fields mapping to Table columns.")
-public class PhoenixSink extends BatchWritableSink<StructuredRecord, byte[], Put> {
-//  public class PhoenixSink extends BatchWritableSink<StructuredRecord, byte[], DBWritable> {
-  private final TableSinkConfig tableSinkConfig;
-  private RecordPutTransformer recordPutTransformer;
-//  private final Config config;
+public class PhoenixSink extends BatchSink<StructuredRecord, byte[], Put> {
 
-  public PhoenixSink(TableSinkConfig tableSinkConfig) {
-    super(tableSinkConfig);
-    this.tableSinkConfig = tableSinkConfig;
+  private final Config config;
+  private final Schema outputSchema;
+
+  private final DBManager dbManager;
+  private Class<? extends Driver> driverClass;
+  private int [] columnTypes;
+  private List<String> columns;
+
+  public PhoenixSink(Config config) {
+    this.config = config;
+    this.outputSchema = createOutputSchema();
+  }
+
+  private String getJDBCPluginId() {
+    return String.format("%s.%s.%s", "sink", dbSinkConfig.jdbcPluginType, dbSinkConfig.jdbcPluginName);
   }
 
   @Override
   public void configurePipeline(PipelineConfigurer pipelineConfigurer) {
     super.configurePipeline(pipelineConfigurer);
-    Preconditions.checkArgument(tableSinkConfig.containsMacro(Properties.Table.PROPERTY_SCHEMA_ROW_FIELD) ||
-                                  !Strings.isNullOrEmpty(tableSinkConfig.getRowField()),
-                                "Row field must be given as a property.");
-    Schema outputSchema =
-      SchemaValidator.validateOutputSchemaAndInputSchemaIfPresent(tableSinkConfig.getSchemaStr(),
-                                                                  tableSinkConfig.getRowField(), pipelineConfigurer);
-    if ((outputSchema != null) && (outputSchema.getFields().size() == 1)) {
-      String fieldName = outputSchema.getFields().get(0).getName();
-      if (fieldName.equals(tableSinkConfig.getRowField())) {
-        throw new IllegalArgumentException(
-          String.format("Output schema should have columns other than rowkey."));
-      }
-    }
+
     // NOTE: this is done only for testing, once CDAP-4575 is implemented, we can use this schema in initialize
     pipelineConfigurer.getStageConfigurer().setOutputSchema(outputSchema);
-
-
-//    PhoenixMapReduceUtil.setOutput(job, DBRecord.class, config.tableName, config.tableColumns);
-
-  }
-
-  @Override
-  protected boolean shouldSkipCreateAtConfigure() {
-    return tableSinkConfig.containsMacro(Properties.Table.PROPERTY_SCHEMA) ||
-      tableSinkConfig.containsMacro(Properties.Table.PROPERTY_SCHEMA_ROW_FIELD);
   }
 
   @Override
   public void initialize(BatchRuntimeContext context) throws Exception {
     super.initialize(context);
-    Schema outputSchema = null;
-    // If a schema string is present in the properties, use that to construct the outputSchema and pass it to the
-    // recordPutTransformer
-    String schemaString = tableSinkConfig.getSchemaStr();
-    if (schemaString != null) {
-      outputSchema = Schema.parseJson(schemaString);
-    }
-    recordPutTransformer = new RecordPutTransformer(tableSinkConfig.getRowField(), outputSchema);
+    driverClass = context.loadPluginClass(getJDBCPluginId());
+    setResultSetMetadata();
   }
-
-  @Override
-  protected Map<String, String> getProperties() {
-    Map<String, String> properties;
-    properties = new HashMap<>(tableSinkConfig.getProperties().getProperties());
-
-    properties.put(Properties.BatchReadableWritable.NAME, tableSinkConfig.getName());
-    properties.put(Properties.BatchReadableWritable.TYPE, Table.class.getName());
-    return properties;
-  }
-
-//  @Override
-//  public void transform(StructuredRecord input, Emitter<KeyValue<byte[], Put>> emitter) throws Exception {
-//    Put put = recordPutTransformer.toPut(input);
-//    emitter.emit(new KeyValue<>(put.getRow(), put));
-//  }
 
   @Override
   public void transform(StructuredRecord input, Emitter<KeyValue<byte[], DBWritable>> emitter) throws Exception {
     Put put = recordPutTransformer.toPut(input);
     emitter.emit(new KeyValue<>(put.getRow(), put));
-    PhoenixMapReduceUtil.setOutput(job, "TABLE_NAME", "<TABLE_COLUMNS>");
   }
-
-//  @Override
-//  public void prepareRun(BatchSinkContext context) throws Exception {
-//    Job job = JobUtils.createInstance();
-//
-////    HiveSinkOutputFormatProvider sinkOutputFormatProvider = new HiveSinkOutputFormatProvider(job, config);
-////    HCatSchema hiveSchema = sinkOutputFormatProvider.getHiveSchema();
-//
-//    context.getArguments().set(config.getDBTable(), GSON.toJson(hiveSchema));
-//    context.addOutput(Output.of(config.referenceName, sinkOutputFormatProvider));
-//  }
 
   @Override
   public void prepareRun(BatchSinkContext context) throws Exception {
-    Job job = createJob();
-    PhoenixMapReduceUtil.setOutput(job, DBRecord.class, config.tableName, config.inputQuery);
-    context.setInput(Input.of(config.referenceName,
-            new SourceInputFormatProvider(PhoenixInputFormat.class, job.getConfiguration())));
+    Job job = JobUtils.createInstance();
+    PhoenixMapReduceUtil.setOutput(job, config.tableName, config.columns);
+    context.addOutput(Output.of(config.referenceName,
+                                new SinkOutputFormatProvider(PhoenixOutputFormat.class, job.getConfiguration())));
   }
 
+  private void setResultSetMetadata() throws Exception {
+    Map<String, Integer> columnToType = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    dbManager.ensureJDBCDriverIsAvailable(driverClass);
+
+    Connection connection;
+    if (config.user == null) {
+      connection = DriverManager.getConnection(config.connectionString);
+    } else {
+      connection = DriverManager.getConnection(config.connectionString, config.user, config.password);
+    }
+
+    try {
+      try (Statement statement = connection.createStatement();
+           // Run a query against the DB table that returns 0 records, but returns valid ResultSetMetadata
+           // that can be used to construct DBRecord objects to sink to the database table.
+           ResultSet rs = statement.executeQuery(String.format("SELECT %s FROM %s WHERE 1 = 0",
+                                                               config.columns, config.tableName))
+      ) {
+        ResultSetMetaData resultSetMetadata = rs.getMetaData();
+//        FieldCase fieldCase = FieldCase.toFieldCase(config.columnNameCase);
+        FieldCase fieldCase = FieldCase.LOWER;
+        // JDBC driver column indices start with 1
+        for (int i = 0; i < rs.getMetaData().getColumnCount(); i++) {
+          String name = resultSetMetadata.getColumnName(i + 1);
+          int type = resultSetMetadata.getColumnType(i + 1);
+          if (fieldCase == FieldCase.LOWER) {
+            name = name.toLowerCase();
+          } else if (fieldCase == FieldCase.UPPER) {
+            name = name.toUpperCase();
+          }
+          columnToType.put(name, type);
+        }
+      }
+    } finally {
+      connection.close();
+    }
+
+    columns = ImmutableList.copyOf(Splitter.on(",").omitEmptyStrings().trimResults().split(config.columns));
+    columnTypes = new int[columns.size()];
+    for (int i = 0; i < columnTypes.length; i++) {
+      String name = columns.get(i);
+      Preconditions.checkArgument(columnToType.containsKey(name), "Missing column '%s' in SQL table", name);
+      columnTypes[i] = columnToType.get(name);
+    }
+  }
+
+  /**
+   * Configurations for the {@link PhoenixSink} plugin.
+   */
+  public static final class Config extends ConnectionConfig {
+
+    @Name(Constants.Reference.REFERENCE_NAME)
+    @Description(Constants.Reference.REFERENCE_NAME_DESCRIPTION)
+    public String referenceName;
+
+    @Description(
+      "Table to write to."
+    )
+    @Macro
+    private String tableName;
+
+    @Description(
+      "Comma-separated list of columns."
+    )
+    @Macro
+    private String columns;
+  }
 }

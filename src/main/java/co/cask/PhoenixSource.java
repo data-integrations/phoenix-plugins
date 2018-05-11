@@ -32,6 +32,7 @@ import co.cask.cdap.etl.api.PipelineConfigurer;
 import co.cask.cdap.etl.api.batch.BatchSource;
 import co.cask.cdap.etl.api.batch.BatchSourceContext;
 import co.cask.hydrator.common.SourceInputFormatProvider;
+import co.cask.hydrator.common.batch.JobUtils;
 import co.cask.hydrator.plugin.*;
 import co.cask.hydrator.plugin.DBUtils;
 import co.cask.hydrator.plugin.db.batch.source.DBSource;
@@ -94,7 +95,7 @@ public class PhoenixSource extends BatchSource<LongWritable, DBRecord, Structure
 
   @Override
   public void prepareRun(BatchSourceContext context) throws Exception {
-    Job job = createJob();
+    Job job = JobUtils.createInstance();
     PhoenixMapReduceUtil.setInput(job, DBRecord.class, config.tableName, config.inputQuery);
     context.setInput(Input.of(config.referenceName,
                               new SourceInputFormatProvider(PhoenixInputFormat.class, job.getConfiguration())));
@@ -116,28 +117,6 @@ public class PhoenixSource extends BatchSource<LongWritable, DBRecord, Structure
 //            Schema.Field.of("filePath", Schema.of(Schema.Type.STRING)),
 //            Schema.Field.of("body", Schema.of(Schema.Type.BYTES))
     );
-  }
-
-
-  private static Job createJob() throws IOException {
-    try {
-      Job job = Job.getInstance();
-
-      LOG.info("Job new instance");
-
-      // some input formats require the credentials to be present in the job. We don't know for
-      // sure which ones (HCatalog is one of them), so we simply always add them. This has no other
-      // effect, because this method is only used at configure time and will be ignored later on.
-      if (UserGroupInformation.isSecurityEnabled()) {
-        Credentials credentials = UserGroupInformation.getCurrentUser().getCredentials();
-        job.getCredentials().addAll(credentials);
-      }
-
-      return job;
-    } catch (Exception e) {
-      LOG.error("Exception ", e);
-      throw e;
-    }
   }
 
   /**
