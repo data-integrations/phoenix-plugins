@@ -101,11 +101,6 @@ public class PhoenixSource extends BatchSource<LongWritable, DBRecord, Structure
                               new SourceInputFormatProvider(PhoenixInputFormat.class, job.getConfiguration())));
   }
 
-//  @Override
-//  public void transform(KeyValue<LongWritable, DBRecord> input, Emitter<StructuredRecord> emitter) throws Exception {
-//    emitter.emit(StructuredRecordUtils.convertCase(
-//            input.getValue().getRecord(), FieldCase.toFieldCase(sourceConfig.columnNameCase)));
-//  }
   @Override
   public void transform(KeyValue<LongWritable, DBRecord> input, Emitter<StructuredRecord> emitter) throws Exception {
       emitter.emit(input.getValue().getRecord());

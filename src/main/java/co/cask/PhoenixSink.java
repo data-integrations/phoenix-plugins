@@ -24,34 +24,28 @@ import co.cask.cdap.api.data.batch.Output;
 import co.cask.cdap.api.data.format.StructuredRecord;
 import co.cask.cdap.api.data.schema.Schema;
 import co.cask.cdap.api.dataset.lib.KeyValue;
-import co.cask.cdap.api.dataset.table.Put;
-import co.cask.cdap.api.dataset.table.Table;
-import co.cask.cdap.api.plugin.PluginConfig;
 import co.cask.cdap.etl.api.Emitter;
 import co.cask.cdap.etl.api.PipelineConfigurer;
 import co.cask.cdap.etl.api.batch.BatchRuntimeContext;
 import co.cask.cdap.etl.api.batch.BatchSink;
 import co.cask.cdap.etl.api.batch.BatchSinkContext;
-import co.cask.cdap.format.RecordPutTransformer;
 import co.cask.hydrator.common.Constants;
-import co.cask.hydrator.common.ReferenceBatchSink;
-import co.cask.hydrator.common.SchemaValidator;
 import co.cask.hydrator.common.batch.JobUtils;
 import co.cask.hydrator.common.batch.sink.SinkOutputFormatProvider;
 import co.cask.hydrator.plugin.ConnectionConfig;
 import co.cask.hydrator.plugin.DBManager;
 import co.cask.hydrator.plugin.DBRecord;
+import co.cask.hydrator.plugin.DBUtils;
 import co.cask.hydrator.plugin.FieldCase;
-import co.cask.hydrator.plugin.common.Properties;
-import co.cask.hydrator.plugin.common.TableSinkConfig;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.lib.db.DBWritable;
 import org.apache.phoenix.mapreduce.PhoenixOutputFormat;
 import org.apache.phoenix.mapreduce.util.PhoenixMapReduceUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.Driver;
@@ -59,11 +53,10 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.Statement;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import javax.annotation.Nullable;
 
 /**
  * CDAP Table Dataset Batch Sink.
@@ -72,31 +65,30 @@ import javax.annotation.Nullable;
 @Name("PhoenixSink")
 @Description("Writes records to a Table with one record field mapping to the Table rowkey," +
   " and all other record fields mapping to Table columns.")
-public class PhoenixSink extends BatchSink<StructuredRecord, byte[], Put> {
+public class PhoenixSink extends BatchSink<StructuredRecord, DBRecord, NullWritable> {
+  private static final Logger LOG = LoggerFactory.getLogger(PhoenixSink.class);
 
   private final Config config;
-  private final Schema outputSchema;
 
   private final DBManager dbManager;
+
   private Class<? extends Driver> driverClass;
   private int [] columnTypes;
   private List<String> columns;
 
   public PhoenixSink(Config config) {
     this.config = config;
-    this.outputSchema = createOutputSchema();
+    this.dbManager = new DBManager(config);
   }
 
   private String getJDBCPluginId() {
-    return String.format("%s.%s.%s", "sink", dbSinkConfig.jdbcPluginType, dbSinkConfig.jdbcPluginName);
+    return String.format("%s.%s.%s", "sink", config.jdbcPluginType, config.jdbcPluginName);
   }
 
   @Override
   public void configurePipeline(PipelineConfigurer pipelineConfigurer) {
     super.configurePipeline(pipelineConfigurer);
-
-    // NOTE: this is done only for testing, once CDAP-4575 is implemented, we can use this schema in initialize
-    pipelineConfigurer.getStageConfigurer().setOutputSchema(outputSchema);
+    dbManager.validateJDBCPluginPipeline(pipelineConfigurer, getJDBCPluginId());
   }
 
   @Override
@@ -107,17 +99,46 @@ public class PhoenixSink extends BatchSink<StructuredRecord, byte[], Put> {
   }
 
   @Override
-  public void transform(StructuredRecord input, Emitter<KeyValue<byte[], DBWritable>> emitter) throws Exception {
-    Put put = recordPutTransformer.toPut(input);
-    emitter.emit(new KeyValue<>(put.getRow(), put));
-  }
-
-  @Override
   public void prepareRun(BatchSinkContext context) throws Exception {
+    LOG.info("tableName = {}; pluginType = {}; pluginName = {}; connectionString = {}; columns = {}",
+             config.tableName, config.jdbcPluginType, config.jdbcPluginName,
+             config.connectionString, config.columns);
+
+    // Load the plugin class to make sure it is available.
+    Class<? extends Driver> driverClass = context.loadPluginClass(getJDBCPluginId());
+    // make sure that the table exists
+    try {
+      Preconditions.checkArgument(
+        dbManager.tableExists(driverClass, config.tableName),
+        "Table %s does not exist. Please check that the 'tableName' property " +
+          "has been set correctly, and that the connection string %s points to a valid database.",
+        config.tableName, config.connectionString);
+    } finally {
+      DBUtils.cleanup(driverClass);
+    }
+
     Job job = JobUtils.createInstance();
     PhoenixMapReduceUtil.setOutput(job, config.tableName, config.columns);
     context.addOutput(Output.of(config.referenceName,
                                 new SinkOutputFormatProvider(PhoenixOutputFormat.class, job.getConfiguration())));
+  }
+
+  @Override
+  public void transform(StructuredRecord input, Emitter<KeyValue<DBRecord, NullWritable>> emitter) throws Exception {
+    // Create StructuredRecord that only has the columns in this.columns
+    List<Schema.Field> outputFields = new ArrayList<>();
+    for (String column : columns) {
+      Schema.Field field = input.getSchema().getField(column);
+      Preconditions.checkNotNull(field, "Missing schema field for column '%s'", column);
+      outputFields.add(field);
+    }
+    StructuredRecord.Builder output = StructuredRecord.builder(
+      Schema.recordOf(input.getSchema().getRecordName(), outputFields));
+    for (String column : columns) {
+      output.set(column, input.get(column));
+    }
+
+    emitter.emit(new KeyValue<DBRecord, NullWritable>(new DBRecord(output.build(), columnTypes), null));
   }
 
   private void setResultSetMetadata() throws Exception {
