@@ -88,6 +88,17 @@
       <version>${hydrator.version}</version>
     </dependency>
     <dependency>
+      <groupId>co.cask.hydrator</groupId>
+      <artifactId>core-plugins</artifactId>
+      <version>${hydrator.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
       <version>13.0.1</version>

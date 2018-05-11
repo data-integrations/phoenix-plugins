@@ -77,8 +77,6 @@ import java.sql.*;
 @Description("Reads content of an HBase table using Phoenix")
 public class PhoenixSource extends BatchSource<LongWritable, DBRecord, StructuredRecord> {
 
-
-
   private static final Logger LOG = LoggerFactory.getLogger(PhoenixSource.class);
 
   private final Config config;
