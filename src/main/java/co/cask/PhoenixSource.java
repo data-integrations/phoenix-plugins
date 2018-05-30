@@ -107,13 +107,31 @@ public class PhoenixSource extends BatchSource<LongWritable, DBRecord, Structure
   }
 
   private Schema createOutputSchema() {
-    return Schema.recordOf("output"
-//            ,
-//            Schema.Field.of("filePath", Schema.of(Schema.Type.STRING)),
-//            Schema.Field.of("body", Schema.of(Schema.Type.BYTES))
+    return Schema.recordOf("output",
+            Schema.Field.of("filePath", Schema.of(Schema.Type.STRING)),
+            Schema.Field.of("body", Schema.of(Schema.Type.BYTES))
     );
   }
+  private static Job createJob() throws IOException {
+    try {
+      Job job = Job.getInstance();
 
+      LOG.info("Job new instance");
+
+      // some input formats require the credentials to be present in the job. We don't know for
+      // sure which ones (HCatalog is one of them), so we simply always add them. This has no other
+      // effect, because this method is only used at configure time and will be ignored later on.
+      if (UserGroupInformation.isSecurityEnabled()) {
+        Credentials credentials = UserGroupInformation.getCurrentUser().getCredentials();
+        job.getCredentials().addAll(credentials);
+      }
+
+      return job;
+    } catch (Exception e) {
+      LOG.error("Exception ", e);
+      throw e;
+    }
+  }
   /**
    * Configurations for the {@link PhoenixSource} plugin.
    */
@@ -156,99 +174,99 @@ public class PhoenixSource extends BatchSource<LongWritable, DBRecord, Structure
  *
 **/
 
-
-class GetSchemaRequest {
-    public String connectionString;
-    @Nullable
-    public String user;
-    @Nullable
-    public String password;
-    public String jdbcPluginName;
-    @Nullable
-    public String jdbcPluginType;
-    public String query;
-
-    private String getJDBCPluginType() {
-        return jdbcPluginType == null ? "jdbc" : jdbcPluginType;
-    }
-}
-
-    /**
-     * Endpoint method to get the output schema of a query.
-     *
-     * @param request {@link DBSource.GetSchemaRequest} containing information required for connection and query to execute.
-     * @param pluginContext context to create plugins
-     * @return schema of fields
-     * @throws SQLException
-     * @throws InstantiationException
-     * @throws IllegalAccessException
-     */
-    @Path("getSchema")
-    public Schema getSchema(GetSchemaRequest request,
-                            EndpointPluginContext pluginContext) throws IllegalAccessException,
-            SQLException, InstantiationException {
-        DriverCleanup driverCleanup;
-        try {
-            driverCleanup = loadPluginClassAndGetDriver(request, pluginContext);
-            try (Connection connection = getConnection(request.connectionString, request.user, request.password)) {
-                String query = request.query;
-                Statement statement = connection.createStatement();
-                statement.setMaxRows(1);
-                if (query.contains("$CONDITIONS")) {
-                    query = removeConditionsClause(query);
-                }
-                ResultSet resultSet = statement.executeQuery(query);
-                return Schema.recordOf("outputSchema", DBUtils.getSchemaFields(resultSet));
-            } finally {
-                driverCleanup.destroy();
-            }
-        } catch (Exception e) {
-            LOG.error("Exception while performing getSchema", e);
-            throw e;
-        }
-    }
-
-    private static String removeConditionsClause(String importQuerySring) {
-        importQuerySring = importQuerySring.replaceAll("\\s{2,}", " ").toUpperCase();
-        if (importQuerySring.contains("WHERE $CONDITIONS AND")) {
-            importQuerySring = importQuerySring.replace("$CONDITIONS AND", "");
-        } else if (importQuerySring.contains("WHERE $CONDITIONS")) {
-            importQuerySring = importQuerySring.replace("WHERE $CONDITIONS", "");
-        } else if (importQuerySring.contains("AND $CONDITIONS")) {
-            importQuerySring = importQuerySring.replace("AND $CONDITIONS", "");
-        }
-        return importQuerySring;
-    }
-
-    private DriverCleanup loadPluginClassAndGetDriver(GetSchemaRequest request, EndpointPluginContext pluginContext)
-            throws IllegalAccessException, InstantiationException, SQLException {
-        Class<? extends Driver> driverClass =
-                pluginContext.loadPluginClass(request.getJDBCPluginType(),
-                        request.jdbcPluginName, PluginProperties.builder().build());
-
-        if (driverClass == null) {
-            throw new InstantiationException(
-                    String.format("Unable to load Driver class with plugin type %s and plugin name %s",
-                            request.getJDBCPluginType(), request.jdbcPluginName));
-        }
-
-        try {
-            return DBUtils.ensureJDBCDriverIsAvailable(driverClass, request.connectionString,
-                    request.getJDBCPluginType(), request.jdbcPluginName);
-        } catch (IllegalAccessException | InstantiationException | SQLException e) {
-            LOG.error("Unable to load or register driver {}", driverClass, e);
-            throw e;
-        }
-    }
-
-    private Connection getConnection(String connectionString,
-                                     @Nullable String user, @Nullable String password) throws SQLException {
-        if (user == null) {
-            return DriverManager.getConnection(connectionString);
-        } else {
-            return DriverManager.getConnection(connectionString, user, password);
-        }
-    }
+//
+//class GetSchemaRequest {
+//    public String connectionString;
+//    @Nullable
+//    public String user;
+//    @Nullable
+//    public String password;
+//    public String jdbcPluginName;
+//    @Nullable
+//    public String jdbcPluginType;
+//    public String query;
+//
+//    private String getJDBCPluginType() {
+//        return jdbcPluginType == null ? "jdbc" : jdbcPluginType;
+//    }
+//}
+//
+//    /**
+//     * Endpoint method to get the output schema of a query.
+//     *
+//     * @param request {@link DBSource.GetSchemaRequest} containing information required for connection and query to execute.
+//     * @param pluginContext context to create plugins
+//     * @return schema of fields
+//     * @throws SQLException
+//     * @throws InstantiationException
+//     * @throws IllegalAccessException
+//     */
+//    @Path("getSchema")
+//    public Schema getSchema(GetSchemaRequest request,
+//                            EndpointPluginContext pluginContext) throws IllegalAccessException,
+//            SQLException, InstantiationException {
+//        DriverCleanup driverCleanup;
+//        try {
+//            driverCleanup = loadPluginClassAndGetDriver(request, pluginContext);
+//            try (Connection connection = getConnection(request.connectionString, request.user, request.password)) {
+//                String query = request.query;
+//                Statement statement = connection.createStatement();
+//                statement.setMaxRows(1);
+//                if (query.contains("$CONDITIONS")) {
+//                    query = removeConditionsClause(query);
+//                }
+//                ResultSet resultSet = statement.executeQuery(query);
+//                return Schema.recordOf("outputSchema", DBUtils.getSchemaFields(resultSet));
+//            } finally {
+//                driverCleanup.destroy();
+//            }
+//        } catch (Exception e) {
+//            LOG.error("Exception while performing getSchema", e);
+//            throw e;
+//        }
+//    }
+//
+//    private static String removeConditionsClause(String importQuerySring) {
+//        importQuerySring = importQuerySring.replaceAll("\\s{2,}", " ").toUpperCase();
+//        if (importQuerySring.contains("WHERE $CONDITIONS AND")) {
+//            importQuerySring = importQuerySring.replace("$CONDITIONS AND", "");
+//        } else if (importQuerySring.contains("WHERE $CONDITIONS")) {
+//            importQuerySring = importQuerySring.replace("WHERE $CONDITIONS", "");
+//        } else if (importQuerySring.contains("AND $CONDITIONS")) {
+//            importQuerySring = importQuerySring.replace("AND $CONDITIONS", "");
+//        }
+//        return importQuerySring;
+//    }
+//
+//    private DriverCleanup loadPluginClassAndGetDriver(GetSchemaRequest request, EndpointPluginContext pluginContext)
+//            throws IllegalAccessException, InstantiationException, SQLException {
+//        Class<? extends Driver> driverClass =
+//                pluginContext.loadPluginClass(request.getJDBCPluginType(),
+//                        request.jdbcPluginName, PluginProperties.builder().build());
+//
+//        if (driverClass == null) {
+//            throw new InstantiationException(
+//                    String.format("Unable to load Driver class with plugin type %s and plugin name %s",
+//                            request.getJDBCPluginType(), request.jdbcPluginName));
+//        }
+//
+//        try {
+//            return DBUtils.ensureJDBCDriverIsAvailable(driverClass, request.connectionString,
+//                    request.getJDBCPluginType(), request.jdbcPluginName);
+//        } catch (IllegalAccessException | InstantiationException | SQLException e) {
+//            LOG.error("Unable to load or register driver {}", driverClass, e);
+//            throw e;
+//        }
+//    }
+//
+//    private Connection getConnection(String connectionString,
+//                                     @Nullable String user, @Nullable String password) throws SQLException {
+//        if (user == null) {
+//            return DriverManager.getConnection(connectionString);
+//        } else {
+//            return DriverManager.getConnection(connectionString, user, password);
+//        }
+//    }
 
 //    @Override
 //    public void prepareRun(BatchSourceContext context) throws Exception {
