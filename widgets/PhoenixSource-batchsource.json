@@ -21,7 +21,7 @@
           "label": "SQL ",
           "name": "inputQuery",
           "widget-attributes": {
-            "default": "Select * from <Table>.",
+            "default": "Select * from <Table>",
             "rows": "1"
           },"plugin-function": {
           "method": "POST",

@@ -3,9 +3,9 @@ package co.cask;
 import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HConstants;
-import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
+//import org.apache.hadoop.hbase.HBaseConfiguration;
+//import org.apache.hadoop.hbase.HConstants;
+//import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;

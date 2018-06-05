@@ -276,7 +276,14 @@
     <dependency>
       <groupId>org.apache.phoenix</groupId>
       <artifactId>phoenix-core</artifactId>
-      <version>4.3.1</version>
+      <!--<version>4.3.1</version>-->
+      <version>4.7.0-HBase-1.1</version>
+      <exclusions>
+        <!--<exclusion>-->
+          <!--<groupId>org.apache.hbase</groupId>-->
+          <!--<artifactId>hbase-common</artifactId>-->
+        <!--</exclusion>-->
+      </exclusions>
     </dependency>
   </dependencies>
 
@@ -325,7 +332,10 @@
             <Embed-Transitive>true</Embed-Transitive>
             <Embed-Directory>lib</Embed-Directory>
             <!--Only @Plugin classes in the export packages will be included as plugin-->
-            <_exportcontents>co.cask.*</_exportcontents>
+            <!--  Without the phoenix package exported, it fails on SDK (what about cluster?):
+            ClassNotFoundException: Class org.apache.phoenix.mapreduce.PhoenixOutputFormat not found -->
+            <_exportcontents>co.cask.*</_exportcontents> <!-- The following line breaks the source -->
+            <!--<_exportcontents>co.cask.*;org.apache.phoenix.mapreduce.*</_exportcontents>-->
           </instructions>
         </configuration>
         <executions>
